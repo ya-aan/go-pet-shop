@@ -29,6 +29,7 @@
 - **PostgreSQL** — база данных.  
 - **golang-migrate** — управление миграциями БД.  
 - **golangci-lint** — статический анализ кода.  
+- **testify** и **mockery** — моки для unit-тестов (ветка `v2`).  
 - **Taskfile** — автоматизация запуска миграций, линтера и других команд.
 
 ---
@@ -53,7 +54,7 @@ go-pet-shop/
 ## 🛠 Как запустить
 
 1. Клонировать репозиторий:
-   `git clone https://github.com/pavloging/go-pet-shop.git`
+   `git clone https://github.com/ya-aan/go-pet-shop.git`
    `cd go-pet-shop`
 
 2. Настроить окружение.
@@ -69,6 +70,80 @@ go-pet-shop/
 5. После этого API будет доступно по адресу:
 `http://localhost:8080`
 
+---
+
+## 🧪 Тестирование
+
+Unit-тесты HTTP-хендлеров товаров лежат в `internal/handlers/product/products_test.go`.
+Тестируется только HTTP-слой: хранилище подменяется моком интерфейса `Products`,
+поэтому PostgreSQL и Docker для тестов не нужны.
+
+Для каждого хендлера (`GetAllProducts`, `CreateProduct`, `UpdateProduct`, `DeleteProduct`)
+проверяются **код и тело ответа** в сценариях:
+
+| Хендлер | Успех (200) | Ошибка сервиса (500) | Некорректный вход (400) |
+|---|---|---|---|
+| `GetAllProducts` | да | да | не применимо, см. ниже |
+| `CreateProduct` | да | да | битый JSON |
+| `UpdateProduct` | да | да | битый JSON |
+| `DeleteProduct` | да | да | пустой `id` |
+
+`GetAllProducts` не принимает входных данных: хендлер не читает ни тело запроса,
+ни параметры пути или запроса, а только вызывает `storage.GetAllProducts`.
+Поэтому сценария «некорректный вход» для него нет.
+
+### Ветки `v1` и `v2`
+
+Обе ветки тестируют одни и те же хендлеры в одних и тех же сценариях.
+Отличается только способ получения мока для `Products`.
+
+| | `v1` — ручной мок | `v2` — `go:generate` + mockery |
+|---|---|---|
+| Где мок | `internal/handlers/product/product_mock.go`, тип `ProductsMock` | `internal/handlers/product/mocks/Products.go`, тип `mocks.Products` |
+| Как появился | написан вручную | сгенерирован по интерфейсу `Products` командой `go generate` |
+| Настройка в тесте | поля-функции: `&ProductsMock{GetAllProductsFunc: func(...) {...}}` | `m := mocks.NewProducts(t)`, затем `m.On("GetAllProducts", mock.Anything).Return(...)` |
+| Проверка вызовов | нет: если функция не задана, метод вернёт нулевые значения | да: `NewProducts(t)` проверяет, что ожидаемые вызовы были, а неожиданный вызов валит тест |
+| Зависимости | только стандартная библиотека | `github.com/stretchr/testify/mock`, mockery как tool-зависимость в `go.mod` |
+
+### Запуск тестов
+
+Сначала выберите версию: `git checkout v1` (ручной мок) или `git checkout v2` (mockery).
+
+```bash
+go test ./...                                                    # все тесты
+go test ./internal/handlers/product/ -v                          # хендлеры товаров, подробный вывод
+go test ./internal/handlers/product/ -run TestCreateProduct -v   # тесты одного хендлера
+```
+
+### Перегенерация моков (ветка `v2`)
+
+Директива лежит над интерфейсом `Products` в `internal/handlers/product/products.go`:
+
+```go
+//go:generate go run github.com/vektra/mockery/v2 --name=Products
+```
+
+Чтобы перегенерировать мок:
+
+```bash
+go generate ./...
+```
+
+Запускать после любого изменения интерфейса `Products`. Устанавливать mockery отдельно не нужно,
+`go run` берёт его версию из `go.mod`. Файл `mocks/Products.go` генерируется, вручную его не правим.
+В ветке `v1` мок ручной, генерировать нечего.
+
+### Форматирование и линтер
+
+```bash
+gofmt -l .                # пустой вывод — всё отформатировано
+golangci-lint run ./...   # или: task linter
+```
+
+Конфиг `.golangci.yaml` написан в формате golangci-lint v2.
+
+---
+
 ## 🧩 Версии проекта
 Проект развивается по шагам, каждая часть закреплена в отдельной ветке:
 
@@ -76,3 +151,6 @@ v1 — CRUD для товаров и пользователей.
 v2 — Добавлены заказы и позиции заказа.
 v3 — Оформление заказа в транзакции.
 v4 — История заказов и аналитика (популярные товары).
+
+> Названия `v1` и `v2` в разделе «Тестирование» относятся к домашнему заданию по unit-тестам
+> (ручной мок и mockery) и не совпадают с этапами проекта из списка выше.
