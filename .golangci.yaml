@@ -1,18 +1,34 @@
-linters:
-  enable:
-    - unused
-    - bodyclose
-    - govet
-    - staticcheck
-    - errcheck
-    - ineffassign
-    - gocyclo
+version: "2"
 
 run:
   timeout: 2m
   tests: true
 
+linters:
+  enable:
+    - bodyclose
+    - gocyclo
+  exclusions:
+    generated: lax
+    rules:
+      # В golangci-lint v2 в staticcheck вошли quickfix-проверки; эту стилистическую
+      # подсказку не применяем: cfg.HTTPServer.Address читается яснее, чем cfg.Address.
+      - linters:
+          - staticcheck
+        text: QF1008
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
 issues:
-  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
