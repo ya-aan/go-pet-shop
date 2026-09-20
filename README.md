@@ -54,7 +54,7 @@ go-pet-shop/
 ## 🛠 Как запустить
 
 1. Клонировать репозиторий:
-   `git clone https://github.com/pavloging/go-pet-shop.git`
+   `git clone https://github.com/ya-aan/go-pet-shop.git`
    `cd go-pet-shop`
 
 2. Настроить окружение.
@@ -106,6 +106,8 @@ Unit-тесты HTTP-хендлеров товаров лежат в `internal/h
 | Зависимости | только стандартная библиотека | `github.com/stretchr/testify/mock`, mockery как tool-зависимость в `go.mod` |
 
 ### Запуск тестов
+
+Сначала выберите версию: `git checkout v1` (ручной мок) или `git checkout v2` (mockery).
 
 ```bash
 go test ./...                                                    # все тесты
