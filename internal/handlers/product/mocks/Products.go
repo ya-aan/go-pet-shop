@@ -90,6 +90,34 @@ func (_m *Products) GetAllProducts(ctx context.Context) ([]models.Product, error
 	return r0, r1
 }
 
+// GetProductByID provides a mock function with given fields: ctx, id
+func (_m *Products) GetProductByID(ctx context.Context, id int) (models.Product, error) {
+	ret := _m.Called(ctx, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetProductByID")
+	}
+
+	var r0 models.Product
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int) (models.Product, error)); ok {
+		return rf(ctx, id)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int) models.Product); ok {
+		r0 = rf(ctx, id)
+	} else {
+		r0 = ret.Get(0).(models.Product)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int) error); ok {
+		r1 = rf(ctx, id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // UpdateProduct provides a mock function with given fields: ctx, _a1
 func (_m *Products) UpdateProduct(ctx context.Context, _a1 models.Product) error {
 	ret := _m.Called(ctx, _a1)

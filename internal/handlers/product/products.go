@@ -2,12 +2,13 @@ package product
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go-pet-shop/internal/models"
+	"go-pet-shop/internal/storage"
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -17,6 +18,7 @@ import (
 //go:generate go run github.com/vektra/mockery/v2 --name=Products
 type Products interface {
 	GetAllProducts(ctx context.Context) ([]models.Product, error)
+	GetProductByID(ctx context.Context, id int) (models.Product, error)
 	CreateProduct(ctx context.Context, product models.Product) (int, error)
 	DeleteProduct(ctx context.Context, id int) error
 	UpdateProduct(ctx context.Context, product models.Product) error
@@ -58,6 +60,67 @@ func (h *Handler) GetAllProducts(w http.ResponseWriter, r *http.Request) {
 	)
 
 	render.JSON(w, r, items)
+}
+
+func (h *Handler) GetProductByID(w http.ResponseWriter, r *http.Request) {
+	const fn = "handlers.products.GetProductByID"
+
+	log := h.log.With(
+		slog.String("fn", fn),
+		slog.String("request_id", middleware.GetReqID(r.Context())),
+	)
+
+	idStr := chi.URLParam(r, "id")
+	if idStr == "" {
+		log.Error("empty id")
+		w.WriteHeader(http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{
+			"error":   "Bad request",
+			"message": "Product ID is required",
+		})
+		return
+	}
+
+	// Конвертируем ID в int
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		log.Error("invalid id format", slog.Any("error", err), slog.String("id", idStr))
+		w.WriteHeader(http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{
+			"error":   "Bad request",
+			"message": "Product ID must be a number",
+		})
+		return
+	}
+
+	product, err := h.storage.GetProductByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			log.Warn("product not found", slog.Int("id", id))
+			w.WriteHeader(http.StatusNotFound)
+			render.JSON(w, r, map[string]interface{}{
+				"error":   "Not found",
+				"message": fmt.Sprintf("Product with ID %d does not exist", id),
+				"id":      id,
+			})
+			return
+		}
+
+		log.Error("failed to get product", slog.Any("error", err))
+		w.WriteHeader(http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{
+			"error":   "Internal server error",
+			"message": "Failed to retrieve product",
+		})
+		return
+	}
+
+	log.Info("Retrieved product successfully",
+		slog.Int("id", id),
+		slog.String("url", r.URL.String()),
+	)
+
+	render.JSON(w, r, product)
 }
 
 func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
@@ -104,11 +167,11 @@ func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
 
 	if product.Stock < 0 {
 		log.Error("product stock is negative", slog.Int("stock", product.Stock))
+		w.WriteHeader(http.StatusBadRequest)
 		render.JSON(w, r, map[string]string{
 			"error":   "Bad request",
 			"message": "Product stock cannot be negative",
 		})
-		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -132,6 +195,7 @@ func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
 
 	// Возвращаем созданный продукт с его ID
 	product.ID = productID
+	w.WriteHeader(http.StatusCreated)
 	render.JSON(w, r, map[string]interface{}{
 		"status":  "Product created successfully",
 		"id":      productID,
@@ -174,10 +238,7 @@ func (h *Handler) DeleteProduct(w http.ResponseWriter, r *http.Request) {
 
 	// Удаляем продукт
 	if err := h.storage.DeleteProduct(r.Context(), id); err != nil {
-		// Проверяем, является ли ошибка "не найдено" с помощью strings.Contains
-		if strings.Contains(strings.ToLower(err.Error()), "not found") ||
-			strings.Contains(strings.ToLower(err.Error()), "no rows") ||
-			strings.Contains(strings.ToLower(err.Error()), "rows affected: 0") {
+		if errors.Is(err, storage.ErrNotFound) {
 			log.Warn("product not found for deletion", slog.Int("id", id))
 			w.WriteHeader(http.StatusNotFound)
 			render.JSON(w, r, map[string]interface{}{
@@ -291,10 +352,7 @@ func (h *Handler) UpdateProduct(w http.ResponseWriter, r *http.Request) {
 
 	// Обновляем продукт
 	if err := h.storage.UpdateProduct(r.Context(), product); err != nil {
-		// Проверяем, является ли ошибка "не найдено" с помощью strings.Contains
-		if strings.Contains(strings.ToLower(err.Error()), "not found") ||
-			strings.Contains(strings.ToLower(err.Error()), "no rows") ||
-			strings.Contains(strings.ToLower(err.Error()), "rows affected: 0") {
+		if errors.Is(err, storage.ErrNotFound) {
 			log.Warn("product not found for update", slog.Int("id", id))
 			w.WriteHeader(http.StatusNotFound)
 			render.JSON(w, r, map[string]interface{}{

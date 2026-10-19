@@ -3,16 +3,16 @@ package models
 import "time"
 
 type Product struct {
-	ID    int
-	Name  string
-	Price float64
-	Stock int // количество на складе
+	ID    int     `json:"id"`
+	Name  string  `json:"name"`
+	Price float64 `json:"price"`
+	Stock int     `json:"stock"` // количество на складе
 }
 
-type Customer struct {
-	ID    int
-	Name  string
-	Email string
+type User struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 type Order struct {
