@@ -8,10 +8,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// checkTestDatabaseURL - защита от запуска интеграционных тестов на рабочей базе.
-// Тесты применяют миграции и пишут в таблицы, поэтому база разрешена, только если:
-//   - в имени базы есть "test" (например, petshop_test);
-//   - это не та же база, что в DATABASE_URL (тот же хост, порт и имя).
 func checkTestDatabaseURL(testURL, mainURL string) error {
 	testCfg, err := pgx.ParseConfig(testURL)
 	if err != nil {
@@ -28,7 +24,6 @@ func checkTestDatabaseURL(testURL, mainURL string) error {
 	}
 	mainCfg, err := pgx.ParseConfig(mainURL)
 	if err != nil {
-		// DATABASE_URL нужен только для сравнения; если он битый, совпасть с тестовой базой он не может
 		return nil
 	}
 	if strings.EqualFold(testCfg.Host, mainCfg.Host) &&

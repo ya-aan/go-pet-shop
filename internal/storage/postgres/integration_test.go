@@ -1,10 +1,5 @@
 //go:build integration
 
-// Интеграционные тесты хранилища на настоящем PostgreSQL.
-// Запуск: TEST_DATABASE_URL=postgres://.../petshop_test go test -tags integration -count=1 ./internal/storage/postgres/
-// Тесты работают только с отдельной тестовой базой: в её имени должно быть "test",
-// и она не должна совпадать с DATABASE_URL (см. checkTestDatabaseURL).
-// Перед тестами к базе применяются миграции, каждый тест удаляет только созданные им строки.
 package postgres_test
 
 import (
@@ -27,8 +22,7 @@ import (
 )
 
 var (
-	st *postgres.Storage
-	// db - прямое подключение для подготовки данных и очистки после тестов
+	st  *postgres.Storage
 	db  *pgxpool.Pool
 	seq atomic.Int64
 )
@@ -80,8 +74,6 @@ func migrateUp(dsn string) error {
 	return nil
 }
 
-// cleanup - выполняет SQL после теста. t.Cleanup вызывается в обратном порядке,
-// поэтому заказы, созданные позже пользователей и товаров, удаляются раньше них.
 func cleanup(t *testing.T, query string, id int) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -155,12 +147,6 @@ func getItems(t *testing.T, orderID int) []models.OrderItem {
 	return items
 }
 
-// Цены в тестах точно представимы в float64 (10.5, 3.25, 0.25...), поэтому суммы сравниваются через ==.
-
-// =======================
-// Users and products (v1)
-// =======================
-
 func TestCreateUser_DuplicateEmail(t *testing.T) {
 	u := newUser(t)
 
@@ -195,10 +181,6 @@ func TestGetProductByID(t *testing.T) {
 	}
 }
 
-// =======================
-// Orders (v2)
-// =======================
-
 func TestCreateOrder(t *testing.T) {
 	u := newUser(t)
 	before := time.Now().Add(-time.Minute)
@@ -230,22 +212,20 @@ func TestGetOrderByID_NotFound(t *testing.T) {
 	}
 }
 
-// TestAddOrderItem_TotalPrice - сумма заказа после нескольких позиций, включая повторный товар
 func TestAddOrderItem_TotalPrice(t *testing.T) {
 	u := newUser(t)
 	food := newProduct(t, "IT Dog Food", 10.5, 100)
 	toy := newProduct(t, "IT Cat Toy", 3.25, 100)
 	orderID := newOrder(t, u.ID)
 
-	addItem(t, orderID, food.ID, 2) // 21.00
-	addItem(t, orderID, toy.ID, 3)  //  9.75
-	addItem(t, orderID, food.ID, 1) // 10.50
+	addItem(t, orderID, food.ID, 2)
+	addItem(t, orderID, toy.ID, 3)
+	addItem(t, orderID, food.ID, 1)
 
 	if got, want := getOrder(t, orderID).TotalPrice, 41.25; got != want {
 		t.Fatalf("expected total_price %v, got %v", want, got)
 	}
 
-	// JOIN с products: название товара и зафиксированная цена позиции
 	items := getItems(t, orderID)
 	want := []models.OrderItem{
 		{OrderID: orderID, ProductID: food.ID, ProductName: food.Name, Quantity: 2, UnitPrice: 10.5},
@@ -271,14 +251,13 @@ func TestAddOrderItem_TotalPrice(t *testing.T) {
 	}
 }
 
-// TestAddOrderItem_PriceSnapshot - смена цены товара не меняет уже оформленные позиции и сумму
 func TestAddOrderItem_PriceSnapshot(t *testing.T) {
 	ctx := context.Background()
 	u := newUser(t)
 	food := newProduct(t, "IT Dog Food", 10.5, 100)
 	orderID := newOrder(t, u.ID)
 
-	addItem(t, orderID, food.ID, 2) // 2 * 10.5 = 21
+	addItem(t, orderID, food.ID, 2)
 
 	food.Price = 20
 	if err := st.UpdateProduct(ctx, food); err != nil {
@@ -292,8 +271,7 @@ func TestAddOrderItem_PriceSnapshot(t *testing.T) {
 		t.Fatalf("old item unit_price must stay 10.5, got %v", got)
 	}
 
-	// Новая позиция берёт уже новую цену
-	addItem(t, orderID, food.ID, 1) // 21 + 20 = 41
+	addItem(t, orderID, food.ID, 1)
 	if got := getOrder(t, orderID).TotalPrice; got != 41 {
 		t.Fatalf("expected total 41 after adding item at new price, got %v", got)
 	}
@@ -318,13 +296,12 @@ func TestAddOrderItem_DoesNotChangeStock(t *testing.T) {
 	}
 }
 
-// TestAddOrderItem_Errors - при ошибке не остаётся частичных записей: ни позиции, ни изменения суммы
 func TestAddOrderItem_Errors(t *testing.T) {
 	ctx := context.Background()
 	u := newUser(t)
 	food := newProduct(t, "IT Dog Food", 10.5, 100)
 	orderID := newOrder(t, u.ID)
-	addItem(t, orderID, food.ID, 1) // total 10.5
+	addItem(t, orderID, food.ID, 1)
 
 	tests := []struct {
 		name    string
@@ -359,7 +336,6 @@ func TestAddOrderItem_Errors(t *testing.T) {
 	}
 }
 
-// TestAddOrderItem_Concurrent - параллельные добавления в один заказ не теряют обновления суммы
 func TestAddOrderItem_Concurrent(t *testing.T) {
 	u := newUser(t)
 	p := newProduct(t, "IT Treat", 0.25, 1000)
@@ -391,7 +367,6 @@ func TestAddOrderItem_Concurrent(t *testing.T) {
 	}
 }
 
-// TestGetOrdersByUserEmail - LEFT JOIN: заказы пользователя, пользователь без заказов и несуществующий пользователь
 func TestGetOrdersByUserEmail(t *testing.T) {
 	ctx := context.Background()
 	alice := newUser(t)
@@ -401,7 +376,7 @@ func TestGetOrdersByUserEmail(t *testing.T) {
 	first := newOrder(t, alice.ID)
 	addItem(t, first, food.ID, 2)
 	second := newOrder(t, alice.ID)
-	newOrder(t, bob.ID) // чужой заказ не должен попасть в выдачу
+	newOrder(t, bob.ID)
 
 	orders, err := st.GetOrdersByUserEmail(ctx, alice.Email)
 	if err != nil {
@@ -410,7 +385,6 @@ func TestGetOrdersByUserEmail(t *testing.T) {
 	if len(orders) != 2 {
 		t.Fatalf("expected 2 orders, got %+v", orders)
 	}
-	// Новые первыми
 	if orders[0].ID != second || orders[1].ID != first {
 		t.Fatalf("expected orders [%d %d], got [%d %d]", second, first, orders[0].ID, orders[1].ID)
 	}

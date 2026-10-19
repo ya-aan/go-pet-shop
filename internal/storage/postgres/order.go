@@ -17,11 +17,9 @@ const (
 	fkOrderItemsProductID = "order_items_product_id_fkey"
 )
 
-// CreateOrder - создает пустой заказ пользователя и возвращает его ID
 func (s *Storage) CreateOrder(ctx context.Context, o models.Order) (int, error) {
 	const fn = "storage.postgres.order.CreateOrder"
 
-	// Сумма нового заказа всегда 0: она растёт по мере добавления позиций в AddOrderItem
 	var id int
 	err := s.db.QueryRow(ctx,
 		`INSERT INTO orders (user_id, total_price) VALUES ($1, 0) RETURNING id`,
@@ -36,18 +34,13 @@ func (s *Storage) CreateOrder(ctx context.Context, o models.Order) (int, error) 
 	return id, nil
 }
 
-// addOrderItemQuery - добавляет позицию и увеличивает сумму заказа одним запросом.
-// Один SQL-запрос выполняется атомарно: если позиция не вставилась, сумма заказа не меняется,
-// и наоборот. Цена берётся из products в момент добавления и сохраняется в unit_price,
-// поэтому последующее изменение цены товара не затрагивает уже оформленные позиции.
-// Если товара нет, INSERT ... SELECT ничего не вставляет и UPDATE затрагивает 0 строк.
-// Если нет заказа, INSERT падает на внешнем ключе order_items_order_id_fkey.
 const addOrderItemQuery = `
 WITH item AS (
     INSERT INTO order_items (order_id, product_id, quantity, unit_price)
     SELECT $1, p.id, $3, p.price
     FROM products p
     WHERE p.id = $2
+      AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.order_id = $1)
     RETURNING order_id, quantity, unit_price
 )
 UPDATE orders o
@@ -55,7 +48,6 @@ SET total_price = o.total_price + item.unit_price * item.quantity
 FROM item
 WHERE o.id = item.order_id`
 
-// AddOrderItem - добавляет позицию в заказ и пересчитывает сумму заказа
 func (s *Storage) AddOrderItem(ctx context.Context, item models.OrderItem) error {
 	const fn = "storage.postgres.order.AddOrderItem"
 
@@ -66,7 +58,6 @@ func (s *Storage) AddOrderItem(ctx context.Context, item models.OrderItem) error
 			case fkOrderItemsOrderID:
 				return fmt.Errorf("%s: %w: order id=%d", fn, storage.ErrNotFound, item.OrderID)
 			case fkOrderItemsProductID:
-				// Товар удалили между SELECT и проверкой ключа
 				return fmt.Errorf("%s: %w: product id=%d does not exist", fn, storage.ErrInvalidInput, item.ProductID)
 			}
 		}
@@ -74,16 +65,18 @@ func (s *Storage) AddOrderItem(ctx context.Context, item models.OrderItem) error
 	}
 
 	if cmd.RowsAffected() == 0 {
-		// Ничего не вставилось, значит товара нет. Но если нет и заказа,
-		// важнее сообщить об отсутствии заказа: он указан в URL
-		var orderExists bool
+		var orderExists, orderPaid bool
 		if err := s.db.QueryRow(ctx,
-			`SELECT EXISTS (SELECT 1 FROM orders WHERE id = $1)`,
-			item.OrderID).Scan(&orderExists); err != nil {
+			`SELECT EXISTS (SELECT 1 FROM orders WHERE id = $1),
+			        EXISTS (SELECT 1 FROM transactions WHERE order_id = $1)`,
+			item.OrderID).Scan(&orderExists, &orderPaid); err != nil {
 			return fmt.Errorf("%s: %w", fn, err)
 		}
 		if !orderExists {
 			return fmt.Errorf("%s: %w: order id=%d", fn, storage.ErrNotFound, item.OrderID)
+		}
+		if orderPaid {
+			return fmt.Errorf("%s: %w: order id=%d", fn, storage.ErrOrderPaid, item.OrderID)
 		}
 		return fmt.Errorf("%s: %w: product id=%d does not exist", fn, storage.ErrInvalidInput, item.ProductID)
 	}
@@ -91,7 +84,6 @@ func (s *Storage) AddOrderItem(ctx context.Context, item models.OrderItem) error
 	return nil
 }
 
-// GetOrderByID - получает заказ по ID
 func (s *Storage) GetOrderByID(ctx context.Context, id int) (models.Order, error) {
 	const fn = "storage.postgres.order.GetOrderByID"
 
@@ -109,10 +101,6 @@ func (s *Storage) GetOrderByID(ctx context.Context, id int) (models.Order, error
 	return o, nil
 }
 
-// GetOrdersByUserEmail - получает заказы пользователя по email, новые первыми.
-// LEFT JOIN от users отличает два случая за один запрос:
-// нет ни одной строки - пользователя нет (ErrNotFound);
-// одна строка с o.id = NULL - пользователь есть, но заказов у него нет (пустой список).
 func (s *Storage) GetOrdersByUserEmail(ctx context.Context, email string) ([]models.Order, error) {
 	const fn = "storage.postgres.order.GetOrdersByUserEmail"
 
@@ -143,7 +131,7 @@ func (s *Storage) GetOrdersByUserEmail(ctx context.Context, email string) ([]mod
 		userFound = true
 
 		if orderID == nil {
-			continue // пользователь без заказов
+			continue
 		}
 		orders = append(orders, models.Order{
 			ID:         *orderID,
@@ -164,8 +152,6 @@ func (s *Storage) GetOrdersByUserEmail(ctx context.Context, email string) ([]mod
 	return orders, nil
 }
 
-// GetOrderItemsByOrderID - получает позиции заказа вместе с названием товара (JOIN с products).
-// Цена позиции берётся из order_items.unit_price, а не из текущей цены товара.
 func (s *Storage) GetOrderItemsByOrderID(ctx context.Context, orderID int) ([]models.OrderItem, error) {
 	const fn = "storage.postgres.order.GetOrderItemsByOrderID"
 

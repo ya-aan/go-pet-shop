@@ -148,6 +148,34 @@ func (_m *Orders) GetOrdersByUserEmail(ctx context.Context, email string) ([]mod
 	return r0, r1
 }
 
+// PlaceOrder provides a mock function with given fields: ctx, userEmail, items
+func (_m *Orders) PlaceOrder(ctx context.Context, userEmail string, items []models.OrderItem) (int, error) {
+	ret := _m.Called(ctx, userEmail, items)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PlaceOrder")
+	}
+
+	var r0 int
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, []models.OrderItem) (int, error)); ok {
+		return rf(ctx, userEmail, items)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, []models.OrderItem) int); ok {
+		r0 = rf(ctx, userEmail, items)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, []models.OrderItem) error); ok {
+		r1 = rf(ctx, userEmail, items)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // NewOrders creates a new instance of Orders. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewOrders(t interface {

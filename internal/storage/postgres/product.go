@@ -24,7 +24,6 @@ func (s *Storage) GetAllProducts(ctx context.Context) ([]models.Product, error) 
 	}
 	defer rows.Close()
 
-	// Пустой срез, а не nil: пустой список отдаётся в JSON как [], а не null
 	products := []models.Product{}
 	for rows.Next() {
 		var p models.Product
@@ -42,7 +41,6 @@ func (s *Storage) GetAllProducts(ctx context.Context) ([]models.Product, error) 
 	return products, nil
 }
 
-// GetProductByID - получает продукт по ID
 func (s *Storage) GetProductByID(ctx context.Context, id int) (models.Product, error) {
 	const fn = "storage.postgres.product.GetProductByID"
 
@@ -84,7 +82,6 @@ func (s *Storage) DeleteProduct(ctx context.Context, id int) error {
 		`DELETE FROM products WHERE id = $1`,
 		id)
 	if err != nil {
-		// На товар ссылаются позиции заказов: удалять его нельзя, иначе заказы потеряют данные
 		if _, ok := foreignKeyViolation(err); ok {
 			return fmt.Errorf("%s: %w: id=%d", fn, storage.ErrInUse, id)
 		}

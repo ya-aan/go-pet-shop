@@ -69,8 +69,6 @@ func (h *Handler) GetUserByEmail(w http.ResponseWriter, r *http.Request) {
 		slog.String("request_id", middleware.GetReqID(r.Context())),
 	)
 
-	// chi отдаёт параметр в том виде, в каком он пришёл в URL,
-	// поэтому "user%40example.com" нужно раскодировать в "user@example.com"
 	email, err := url.PathUnescape(chi.URLParam(r, "email"))
 	if err != nil || email == "" {
 		log.Error("empty or malformed email in URL", slog.String("email", chi.URLParam(r, "email")))
@@ -144,7 +142,6 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	user.Name = strings.TrimSpace(user.Name)
 	user.Email = strings.TrimSpace(user.Email)
 
-	// Валидация
 	if user.Name == "" {
 		log.Error("user name is empty")
 		w.WriteHeader(http.StatusBadRequest)
@@ -202,7 +199,6 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		slog.String("url", r.URL.String()),
 	)
 
-	// Возвращаем созданного пользователя с его ID
 	user.ID = userID
 	w.WriteHeader(http.StatusCreated)
 	render.JSON(w, r, map[string]interface{}{

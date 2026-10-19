@@ -29,8 +29,6 @@ type userResponse struct {
 	User   models.User `json:"user"`
 }
 
-// newRouter - собирает chi-роутер с ручками пользователей,
-// чтобы параметр {email} разбирался так же, как в main.go
 func newRouter(h *Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/users", h.GetAllUsers)
@@ -70,10 +68,6 @@ func assertErrorBody(t *testing.T, w *httptest.ResponseRecorder, wantError, want
 		t.Fatalf("expected body %+v, got %+v", want, got)
 	}
 }
-
-// =======================
-// Get All Users
-// =======================
 
 func TestGetAllUsers_Success(t *testing.T) {
 	want := []models.User{
@@ -115,14 +109,9 @@ func TestGetAllUsers_Error(t *testing.T) {
 	assertErrorBody(t, w, "Internal server error", "Failed to retrieve users")
 }
 
-// =======================
-// Get User By Email
-// =======================
-
 func TestGetUserByEmail_Success(t *testing.T) {
 	want := models.User{ID: 1, Name: "Alice", Email: "alice@example.com"}
 
-	// Email с точкой в домене и тот же email с закодированным "@" должны дойти до storage целиком.
 	for _, target := range []string{"/users/alice@example.com", "/users/alice%40example.com"} {
 		t.Run(target, func(t *testing.T) {
 			usersMock := mocks.NewUsers(t)
@@ -152,7 +141,6 @@ func TestGetUserByEmail_NotFound(t *testing.T) {
 }
 
 func TestGetUserByEmail_BadRequest(t *testing.T) {
-	// Storage не должен вызываться: мок без ожиданий завалит тест на любом вызове.
 	usersMock := mocks.NewUsers(t)
 
 	w := serve(t, usersMock, http.MethodGet, "/users/not-an-email", "")
@@ -172,13 +160,8 @@ func TestGetUserByEmail_Fail(t *testing.T) {
 	assertErrorBody(t, w, "Internal server error", "Failed to retrieve user")
 }
 
-// =======================
-// Create User
-// =======================
-
 func TestCreateUser_Success(t *testing.T) {
 	usersMock := mocks.NewUsers(t)
-	// Пробелы вокруг имени и email обрезаются до записи в storage.
 	usersMock.On("CreateUser", mock.Anything, models.User{Name: "Alice", Email: "alice@example.com"}).
 		Return(10, nil)
 

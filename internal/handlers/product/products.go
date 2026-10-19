@@ -81,7 +81,6 @@ func (h *Handler) GetProductByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Конвертируем ID в int
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		log.Error("invalid id format", slog.Any("error", err), slog.String("id", idStr))

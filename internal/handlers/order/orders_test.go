@@ -43,13 +43,13 @@ type addItemResponse struct {
 	Quantity  int    `json:"quantity"`
 }
 
-// newRouter - собирает chi-роутер с ручками заказов так же, как в main.go
 func newRouter(h *Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Post("/orders", h.CreateOrder)
 	r.Get("/orders/{id}", h.GetOrderByID)
 	r.Post("/orders/{id}/items", h.AddOrderItem)
 	r.Get("/users/{email}/orders", h.GetOrdersByUserEmail)
+	r.Post("/checkout", h.Checkout)
 	return r
 }
 
@@ -99,13 +99,8 @@ func assertOrderNotFoundBody(t *testing.T, w *httptest.ResponseRecorder, id int)
 	}
 }
 
-// =======================
-// Create Order
-// =======================
-
 func TestCreateOrder_Success(t *testing.T) {
 	ordersMock := mocks.NewOrders(t)
-	// total_price и created_at из тела игнорируются: в storage уходит только user_id.
 	ordersMock.On("CreateOrder", mock.Anything, models.Order{UserID: 3}).Return(15, nil)
 
 	w := serve(t, ordersMock, http.MethodPost, "/orders",
@@ -157,7 +152,6 @@ func TestCreateOrder_UserNotFound(t *testing.T) {
 
 	w := serve(t, ordersMock, http.MethodPost, "/orders", `{"user_id":404}`)
 
-	// Пользователь указан в теле, а не в URL, поэтому 400, а не 404.
 	assertStatus(t, w, http.StatusBadRequest)
 	assertErrorBody(t, w, "Bad request", "User with ID 404 does not exist")
 }
@@ -172,13 +166,8 @@ func TestCreateOrder_Fail(t *testing.T) {
 	assertErrorBody(t, w, "Internal server error", "Failed to create order")
 }
 
-// =======================
-// Add Order Item
-// =======================
-
 func TestAddOrderItem_Success(t *testing.T) {
 	ordersMock := mocks.NewOrders(t)
-	// order_id берётся из URL, unit_price из тела игнорируется: цену фиксирует storage.
 	ordersMock.On("AddOrderItem", mock.Anything, models.OrderItem{OrderID: 7, ProductID: 2, Quantity: 3}).
 		Return(nil)
 
@@ -238,9 +227,28 @@ func TestAddOrderItem_ProductNotFound(t *testing.T) {
 
 	w := serve(t, ordersMock, http.MethodPost, "/orders/1/items", `{"product_id":77,"quantity":1}`)
 
-	// Товар указан в теле, а не в URL, поэтому 400, а не 404.
 	assertStatus(t, w, http.StatusBadRequest)
 	assertErrorBody(t, w, "Bad request", "Product with ID 77 does not exist")
+}
+
+func TestAddOrderItem_OrderPaid(t *testing.T) {
+	ordersMock := mocks.NewOrders(t)
+	ordersMock.On("AddOrderItem", mock.Anything, mock.Anything).
+		Return(fmt.Errorf("storage.postgres.order: %w: order id=4", storage.ErrOrderPaid))
+
+	w := serve(t, ordersMock, http.MethodPost, "/orders/4/items", `{"product_id":2,"quantity":1}`)
+
+	assertStatus(t, w, http.StatusConflict)
+	var got notFoundResponse
+	decodeBody(t, w, &got)
+	want := notFoundResponse{
+		Error:   "Conflict",
+		Message: "Order with ID 4 is already paid and cannot be changed",
+		ID:      4,
+	}
+	if got != want {
+		t.Fatalf("expected body %+v, got %+v", want, got)
+	}
 }
 
 func TestAddOrderItem_Fail(t *testing.T) {
@@ -252,10 +260,6 @@ func TestAddOrderItem_Fail(t *testing.T) {
 	assertStatus(t, w, http.StatusInternalServerError)
 	assertErrorBody(t, w, "Internal server error", "Failed to add item to order")
 }
-
-// =======================
-// Get Order By ID
-// =======================
 
 func TestGetOrderByID_Success(t *testing.T) {
 	createdAt := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
@@ -302,7 +306,6 @@ func TestGetOrderByID_BadRequest(t *testing.T) {
 
 func TestGetOrderByID_NotFound(t *testing.T) {
 	ordersMock := mocks.NewOrders(t)
-	// Позиции не запрашиваются, если заказа нет: мок завалит тест на лишнем вызове.
 	ordersMock.On("GetOrderByID", mock.Anything, 9).
 		Return(models.Order{}, fmt.Errorf("storage.postgres.order: %w", storage.ErrNotFound))
 
@@ -335,17 +338,12 @@ func TestGetOrderByID_Fail(t *testing.T) {
 	})
 }
 
-// =======================
-// Get Orders By User Email
-// =======================
-
 func TestGetOrdersByUserEmail_Success(t *testing.T) {
 	want := []models.Order{
 		{ID: 2, UserID: 1, TotalPrice: 7, CreatedAt: time.Date(2026, 10, 19, 13, 0, 0, 0, time.UTC)},
 		{ID: 1, UserID: 1, TotalPrice: 21, CreatedAt: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)},
 	}
 
-	// Email с точкой в домене и тот же email с закодированным "@" должны дойти до storage целиком.
 	for _, target := range []string{"/users/alice@example.com/orders", "/users/alice%40example.com/orders"} {
 		t.Run(target, func(t *testing.T) {
 			ordersMock := mocks.NewOrders(t)

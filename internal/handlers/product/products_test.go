@@ -31,7 +31,6 @@ type productResponse struct {
 	Product models.Product `json:"product"`
 }
 
-// notFoundResponse - тело ошибки с ID товара (404 и 409)
 type notFoundResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
@@ -57,7 +56,6 @@ func decodeBody(t *testing.T, w *httptest.ResponseRecorder, v any) {
 	}
 }
 
-// errNotFound - ошибка в том виде, в каком её возвращает storage: обёрнутый storage.ErrNotFound
 func errNotFound(id int) error {
 	return fmt.Errorf("storage.postgres.product: %w: id=%d", storage.ErrNotFound, id)
 }
@@ -181,7 +179,6 @@ func TestGetProductByID_NotFound(t *testing.T) {
 }
 
 func TestGetProductByID_BadRequest(t *testing.T) {
-	// Storage не должен вызываться: мок без ожиданий завалит тест на любом вызове.
 	productsMock := mocks.NewProducts(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/products/abc", nil)
@@ -365,6 +362,37 @@ func TestUpdateProduct_BadRequest(t *testing.T) {
 	}
 
 	assertErrorBody(t, w, "Bad request", "Invalid JSON payload")
+}
+
+func TestUpdateProduct_Validation(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		wantMessage string
+	}{
+		{"empty name", `{"name":"","price":10.5,"stock":5}`, "Product name is required"},
+		{"negative price", `{"name":"Dog Food","price":-1,"stock":5}`, "Product price cannot be negative"},
+		{"negative stock", `{"name":"Dog Food","price":10.5,"stock":-1}`, "Product stock cannot be negative"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			productsMock := mocks.NewProducts(t)
+
+			req := httptest.NewRequest(http.MethodPut, "/products/1", strings.NewReader(tt.body))
+			req = withURLParam(req, "id", "1")
+			w := httptest.NewRecorder()
+
+			handler := New(slog.Default(), productsMock)
+			handler.UpdateProduct(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400, got %d", w.Code)
+			}
+
+			assertErrorBody(t, w, "Bad request", tt.wantMessage)
+		})
+	}
 }
 
 func TestUpdateProduct_NotFound(t *testing.T) {

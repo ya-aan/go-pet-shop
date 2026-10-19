@@ -8,9 +8,11 @@ import (
 	"go-pet-shop/internal/models"
 	"go-pet-shop/internal/storage"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -24,6 +26,7 @@ type Orders interface {
 	GetOrderByID(ctx context.Context, id int) (models.Order, error)
 	GetOrdersByUserEmail(ctx context.Context, email string) ([]models.Order, error)
 	GetOrderItemsByOrderID(ctx context.Context, orderID int) ([]models.OrderItem, error)
+	PlaceOrder(ctx context.Context, userEmail string, items []models.OrderItem) (int, error)
 }
 
 type Handler struct {
@@ -38,13 +41,11 @@ func New(log *slog.Logger, storage Orders) *Handler {
 	}
 }
 
-// orderDetailsResponse - ответ GET /orders/{id}: поля заказа и его позиции
 type orderDetailsResponse struct {
 	models.Order
 	Items []models.OrderItem `json:"items"`
 }
 
-// parseOrderID - читает ID заказа из URL; при ошибке сам отвечает 400 и возвращает false
 func parseOrderID(w http.ResponseWriter, r *http.Request, log *slog.Logger) (int, bool) {
 	idStr := chi.URLParam(r, "id")
 	if idStr == "" {
@@ -101,7 +102,6 @@ func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Сумму и дату задаёт сервер, значения из тела запроса не используются
 	order = models.Order{UserID: order.UserID}
 
 	orderID, err := h.storage.CreateOrder(r.Context(), order)
@@ -185,7 +185,6 @@ func (h *Handler) AddOrderItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Заказ берётся из URL, цену фиксирует хранилище: значения из тела запроса не используются
 	item = models.OrderItem{OrderID: orderID, ProductID: item.ProductID, Quantity: item.Quantity}
 
 	if err := h.storage.AddOrderItem(r.Context(), item); err != nil {
@@ -196,6 +195,14 @@ func (h *Handler) AddOrderItem(w http.ResponseWriter, r *http.Request) {
 			render.JSON(w, r, map[string]interface{}{
 				"error":   "Not found",
 				"message": fmt.Sprintf("Order with ID %d does not exist", orderID),
+				"id":      orderID,
+			})
+		case errors.Is(err, storage.ErrOrderPaid):
+			log.Warn("order is already paid", slog.Int("order_id", orderID))
+			w.WriteHeader(http.StatusConflict)
+			render.JSON(w, r, map[string]interface{}{
+				"error":   "Conflict",
+				"message": fmt.Sprintf("Order with ID %d is already paid and cannot be changed", orderID),
 				"id":      orderID,
 			})
 		case errors.Is(err, storage.ErrInvalidInput):
@@ -291,8 +298,6 @@ func (h *Handler) GetOrdersByUserEmail(w http.ResponseWriter, r *http.Request) {
 		slog.String("request_id", middleware.GetReqID(r.Context())),
 	)
 
-	// chi отдаёт параметр в том виде, в каком он пришёл в URL,
-	// поэтому "user%40example.com" нужно раскодировать в "user@example.com"
 	email, err := url.PathUnescape(chi.URLParam(r, "email"))
 	if err != nil || email == "" {
 		log.Error("empty or malformed email in URL", slog.String("email", chi.URLParam(r, "email")))
@@ -341,4 +346,129 @@ func (h *Handler) GetOrdersByUserEmail(w http.ResponseWriter, r *http.Request) {
 	)
 
 	render.JSON(w, r, orders)
+}
+
+type checkoutRequest struct {
+	UserEmail string             `json:"user_email"`
+	Items     []models.OrderItem `json:"items"`
+}
+
+func validateCheckout(req checkoutRequest) ([]models.OrderItem, string) {
+	if req.UserEmail == "" {
+		return nil, "User email is required"
+	}
+	if !validate.Email(req.UserEmail) {
+		return nil, "Invalid email format"
+	}
+	if len(req.Items) == 0 {
+		return nil, "Order must contain at least one item"
+	}
+
+	items := make([]models.OrderItem, 0, len(req.Items))
+	for _, item := range req.Items {
+		if item.ProductID <= 0 {
+			return nil, "Product ID must be a positive number"
+		}
+		if item.Quantity <= 0 || item.Quantity > math.MaxInt32 {
+			return nil, fmt.Sprintf("Quantity must be between 1 and %d", math.MaxInt32)
+		}
+		items = append(items, models.OrderItem{ProductID: item.ProductID, Quantity: item.Quantity})
+	}
+
+	return items, ""
+}
+
+func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
+	const fn = "handlers.orders.Checkout"
+	log := h.log.With(
+		slog.String("fn", fn),
+		slog.String("request_id", middleware.GetReqID(r.Context())),
+	)
+
+	log.Info("Placing order", slog.String("url", r.URL.String()))
+
+	var req checkoutRequest
+	if err := render.DecodeJSON(r.Body, &req); err != nil {
+		log.Error("failed to decode request body", slog.Any("error", err))
+		w.WriteHeader(http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{
+			"error":   "Bad request",
+			"message": "Invalid JSON payload",
+		})
+		return
+	}
+
+	req.UserEmail = strings.TrimSpace(req.UserEmail)
+	items, msg := validateCheckout(req)
+	if msg != "" {
+		log.Error("invalid checkout request", slog.String("reason", msg))
+		w.WriteHeader(http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{
+			"error":   "Bad request",
+			"message": msg,
+		})
+		return
+	}
+
+	orderID, err := h.storage.PlaceOrder(r.Context(), req.UserEmail, items)
+	if err != nil {
+		h.writeCheckoutError(w, r, log, req.UserEmail, err)
+		return
+	}
+
+	log.Info("Order placed successfully",
+		slog.Int("order_id", orderID),
+		slog.String("email", req.UserEmail),
+		slog.Int("items", len(items)),
+	)
+
+	w.WriteHeader(http.StatusCreated)
+	render.JSON(w, r, map[string]interface{}{
+		"status":   "Order placed successfully",
+		"order_id": orderID,
+	})
+}
+
+func (h *Handler) writeCheckoutError(w http.ResponseWriter, r *http.Request, log *slog.Logger, email string, err error) {
+	var productErr *storage.ProductError
+	isProductErr := errors.As(err, &productErr)
+
+	switch {
+	case isProductErr && errors.Is(err, storage.ErrInsufficientStock):
+		log.Warn("insufficient stock", slog.Int("product_id", productErr.ProductID))
+		w.WriteHeader(http.StatusConflict)
+		render.JSON(w, r, map[string]interface{}{
+			"error":      "Conflict",
+			"message":    fmt.Sprintf("Not enough stock for product with ID %d", productErr.ProductID),
+			"product_id": productErr.ProductID,
+		})
+	case isProductErr && errors.Is(err, storage.ErrNotFound):
+		log.Warn("product does not exist", slog.Int("product_id", productErr.ProductID))
+		w.WriteHeader(http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{
+			"error":   "Bad request",
+			"message": fmt.Sprintf("Product with ID %d does not exist", productErr.ProductID),
+		})
+	case isProductErr && errors.Is(err, storage.ErrInvalidInput):
+		log.Warn("invalid quantity", slog.Int("product_id", productErr.ProductID), slog.Any("error", err))
+		w.WriteHeader(http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{
+			"error":   "Bad request",
+			"message": fmt.Sprintf("Total quantity for product with ID %d must be between 1 and %d", productErr.ProductID, math.MaxInt32),
+		})
+	case errors.Is(err, storage.ErrNotFound):
+		log.Warn("user does not exist", slog.String("email", email))
+		w.WriteHeader(http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{
+			"error":   "Bad request",
+			"message": fmt.Sprintf("User with email %s does not exist", email),
+		})
+	default:
+		log.Error("failed to place order", slog.Any("error", err))
+		w.WriteHeader(http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{
+			"error":   "Internal server error",
+			"message": "Failed to place order",
+		})
+	}
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// CreateUser - создает пользователя и возвращает его ID
 func (s *Storage) CreateUser(ctx context.Context, u models.User) (int, error) {
 	const fn = "storage.postgres.user.CreateUser"
 
@@ -30,7 +29,6 @@ func (s *Storage) CreateUser(ctx context.Context, u models.User) (int, error) {
 	return id, nil
 }
 
-// GetUserByEmail - получает пользователя по email
 func (s *Storage) GetUserByEmail(ctx context.Context, email string) (models.User, error) {
 	const fn = "storage.postgres.user.GetUserByEmail"
 
@@ -48,7 +46,6 @@ func (s *Storage) GetUserByEmail(ctx context.Context, email string) (models.User
 	return u, nil
 }
 
-// GetAllUsers - получает всех пользователей
 func (s *Storage) GetAllUsers(ctx context.Context) ([]models.User, error) {
 	const fn = "storage.postgres.user.GetAllUsers"
 
@@ -58,7 +55,6 @@ func (s *Storage) GetAllUsers(ctx context.Context) ([]models.User, error) {
 	}
 	defer rows.Close()
 
-	// Пустой срез, а не nil: пустой список отдаётся в JSON как [], а не null
 	users := []models.User{}
 	for rows.Next() {
 		var u models.User
