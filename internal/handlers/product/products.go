@@ -249,6 +249,17 @@ func (h *Handler) DeleteProduct(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if errors.Is(err, storage.ErrInUse) {
+			log.Warn("product is used in orders", slog.Int("id", id))
+			w.WriteHeader(http.StatusConflict)
+			render.JSON(w, r, map[string]interface{}{
+				"error":   "Conflict",
+				"message": fmt.Sprintf("Product with ID %d is used in orders and cannot be deleted", id),
+				"id":      id,
+			})
+			return
+		}
+
 		log.Error("failed to delete product", slog.Any("error", err))
 		w.WriteHeader(http.StatusInternalServerError)
 		render.JSON(w, r, map[string]string{

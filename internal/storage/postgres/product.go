@@ -84,6 +84,10 @@ func (s *Storage) DeleteProduct(ctx context.Context, id int) error {
 		`DELETE FROM products WHERE id = $1`,
 		id)
 	if err != nil {
+		// На товар ссылаются позиции заказов: удалять его нельзя, иначе заказы потеряют данные
+		if _, ok := foreignKeyViolation(err); ok {
+			return fmt.Errorf("%s: %w: id=%d", fn, storage.ErrInUse, id)
+		}
 		return fmt.Errorf("%s: %w", fn, err)
 	}
 

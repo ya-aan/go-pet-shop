@@ -31,6 +31,7 @@ type productResponse struct {
 	Product models.Product `json:"product"`
 }
 
+// notFoundResponse - тело ошибки с ID товара (404 и 409)
 type notFoundResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
@@ -472,6 +473,34 @@ func TestDeleteProduct_NotFound(t *testing.T) {
 	}
 
 	assertNotFoundBody(t, w, 5)
+}
+
+func TestDeleteProduct_InUse(t *testing.T) {
+	productsMock := mocks.NewProducts(t)
+	productsMock.On("DeleteProduct", mock.Anything, 3).
+		Return(fmt.Errorf("storage.postgres.product: %w: id=3", storage.ErrInUse))
+
+	req := httptest.NewRequest(http.MethodDelete, "/products/3", nil)
+	req = withURLParam(req, "id", "3")
+	w := httptest.NewRecorder()
+
+	handler := New(slog.Default(), productsMock)
+	handler.DeleteProduct(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d", w.Code)
+	}
+
+	var got notFoundResponse
+	decodeBody(t, w, &got)
+	want := notFoundResponse{
+		Error:   "Conflict",
+		Message: "Product with ID 3 is used in orders and cannot be deleted",
+		ID:      3,
+	}
+	if got != want {
+		t.Fatalf("expected body %+v, got %+v", want, got)
+	}
 }
 
 func TestDeleteProduct_Fail(t *testing.T) {

@@ -11,9 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// pgUniqueViolation - код ошибки PostgreSQL при нарушении UNIQUE-ограничения
-const pgUniqueViolation = "23505"
-
 // CreateUser - создает пользователя и возвращает его ID
 func (s *Storage) CreateUser(ctx context.Context, u models.User) (int, error) {
 	const fn = "storage.postgres.user.CreateUser"

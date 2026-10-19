@@ -3,6 +3,8 @@
 # For generate input command:
 # task generate
 # task linter
+# task test
+# task test-integration
 
 version: "3"
 
@@ -18,3 +20,14 @@ tasks:
     desc: "Run linters on the codebase"
     cmds:
       - golangci-lint run ./...
+
+  test:
+    desc: "Run unit tests"
+    cmds:
+      - go test ./...
+
+  test-integration:
+    desc: "Run PostgreSQL integration tests (needs TEST_DATABASE_URL with a separate *test* database)"
+    dotenv: [".env"]
+    cmds:
+      - go test -tags integration -count=1 -v ./internal/storage/postgres/

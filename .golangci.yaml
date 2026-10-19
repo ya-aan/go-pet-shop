@@ -3,6 +3,9 @@ version: "2"
 run:
   timeout: 2m
   tests: true
+  # Чтобы линтер проверял и интеграционные тесты хранилища
+  build-tags:
+    - integration
 
 linters:
   enable:

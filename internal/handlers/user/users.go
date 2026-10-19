@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go-pet-shop/internal/lib/validate"
 	"go-pet-shop/internal/models"
 	"go-pet-shop/internal/storage"
 	"log/slog"
 	"net/http"
-	"net/mail"
 	"net/url"
 	"strings"
 
@@ -34,13 +34,6 @@ func New(log *slog.Logger, storage Users) *Handler {
 		log:     log,
 		storage: storage,
 	}
-}
-
-// isValidEmail - проверяет, что строка является голым адресом вида user@example.com
-// (без имени и угловых скобок, которые тоже допускает mail.ParseAddress)
-func isValidEmail(email string) bool {
-	addr, err := mail.ParseAddress(email)
-	return err == nil && addr.Address == email
 }
 
 func (h *Handler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +82,7 @@ func (h *Handler) GetUserByEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isValidEmail(email) {
+	if !validate.Email(email) {
 		log.Error("invalid email format", slog.String("email", email))
 		w.WriteHeader(http.StatusBadRequest)
 		render.JSON(w, r, map[string]string{
@@ -172,7 +165,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isValidEmail(user.Email) {
+	if !validate.Email(user.Email) {
 		log.Error("invalid email format", slog.String("email", user.Email))
 		w.WriteHeader(http.StatusBadRequest)
 		render.JSON(w, r, map[string]string{

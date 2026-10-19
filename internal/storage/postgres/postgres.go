@@ -2,10 +2,28 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Коды ошибок PostgreSQL, которые хранилище превращает в ошибки пакета storage
+const (
+	pgUniqueViolation     = "23505" // нарушение UNIQUE
+	pgForeignKeyViolation = "23503" // нарушение FOREIGN KEY
+)
+
+// foreignKeyViolation - если err является нарушением внешнего ключа,
+// возвращает имя нарушенного ограничения (например, order_items_order_id_fkey)
+func foreignKeyViolation(err error) (string, bool) {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
+		return pgErr.ConstraintName, true
+	}
+	return "", false
+}
 
 type Storage struct {
 	db *pgxpool.Pool
