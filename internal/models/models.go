@@ -32,3 +32,25 @@ type OrderItem struct {
 	Quantity    int     `json:"quantity"`
 	UnitPrice   float64 `json:"unit_price"`
 }
+
+type Transaction struct {
+	ID        int       `json:"id"`
+	OrderID   int       `json:"order_id"`
+	Amount    float64   `json:"amount"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type OrderDetail struct {
+	Order
+	Items        []OrderItem   `json:"items"`
+	Transactions []Transaction `json:"transactions"`
+}
+
+type PopularProduct struct {
+	ProductID   int     `json:"product_id"`
+	Name        string  `json:"name"`
+	TotalSold   int     `json:"total_sold"`   // сколько единиц продано
+	OrdersCount int     `json:"orders_count"` // в скольких заказах
+	Revenue     float64 `json:"revenue"`      // выручка по ценам позиций
+}

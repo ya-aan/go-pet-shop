@@ -49,6 +49,7 @@ func newRouter(h *Handler) http.Handler {
 	r.Get("/orders/{id}", h.GetOrderByID)
 	r.Post("/orders/{id}/items", h.AddOrderItem)
 	r.Get("/users/{email}/orders", h.GetOrdersByUserEmail)
+	r.Get("/users/{email}/history", h.GetUserOrderHistory)
 	r.Post("/checkout", h.Checkout)
 	return r
 }

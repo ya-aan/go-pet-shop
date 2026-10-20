@@ -90,6 +90,35 @@ func (_m *Products) GetAllProducts(ctx context.Context) ([]models.Product, error
 	return r0, r1
 }
 
+func (_m *Products) GetPopularProducts(ctx context.Context) ([]models.PopularProduct, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPopularProducts")
+	}
+
+	var r0 []models.PopularProduct
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]models.PopularProduct, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []models.PopularProduct); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.PopularProduct)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetProductByID provides a mock function with given fields: ctx, id
 func (_m *Products) GetProductByID(ctx context.Context, id int) (models.Product, error) {
 	ret := _m.Called(ctx, id)

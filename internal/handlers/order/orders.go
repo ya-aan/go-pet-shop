@@ -19,7 +19,6 @@ import (
 	"github.com/go-chi/render"
 )
 
-//go:generate go run github.com/vektra/mockery/v2 --name=Orders
 type Orders interface {
 	CreateOrder(ctx context.Context, order models.Order) (int, error)
 	AddOrderItem(ctx context.Context, orderItem models.OrderItem) error
@@ -27,6 +26,7 @@ type Orders interface {
 	GetOrdersByUserEmail(ctx context.Context, email string) ([]models.Order, error)
 	GetOrderItemsByOrderID(ctx context.Context, orderID int) ([]models.OrderItem, error)
 	PlaceOrder(ctx context.Context, userEmail string, items []models.OrderItem) (int, error)
+	GetUserOrderHistory(ctx context.Context, email string) ([]models.OrderDetail, error)
 }
 
 type Handler struct {
@@ -70,6 +70,31 @@ func parseOrderID(w http.ResponseWriter, r *http.Request, log *slog.Logger) (int
 	}
 
 	return id, true
+}
+
+func parseUserEmail(w http.ResponseWriter, r *http.Request, log *slog.Logger) (string, bool) {
+	email, err := url.PathUnescape(chi.URLParam(r, "email"))
+	if err != nil || email == "" {
+		log.Error("empty or malformed email in URL", slog.String("email", chi.URLParam(r, "email")))
+		w.WriteHeader(http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{
+			"error":   "Bad request",
+			"message": "User email is required",
+		})
+		return "", false
+	}
+
+	if !validate.Email(email) {
+		log.Error("invalid email format", slog.String("email", email))
+		w.WriteHeader(http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{
+			"error":   "Bad request",
+			"message": "Invalid email format",
+		})
+		return "", false
+	}
+
+	return email, true
 }
 
 func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
@@ -298,24 +323,8 @@ func (h *Handler) GetOrdersByUserEmail(w http.ResponseWriter, r *http.Request) {
 		slog.String("request_id", middleware.GetReqID(r.Context())),
 	)
 
-	email, err := url.PathUnescape(chi.URLParam(r, "email"))
-	if err != nil || email == "" {
-		log.Error("empty or malformed email in URL", slog.String("email", chi.URLParam(r, "email")))
-		w.WriteHeader(http.StatusBadRequest)
-		render.JSON(w, r, map[string]string{
-			"error":   "Bad request",
-			"message": "User email is required",
-		})
-		return
-	}
-
-	if !validate.Email(email) {
-		log.Error("invalid email format", slog.String("email", email))
-		w.WriteHeader(http.StatusBadRequest)
-		render.JSON(w, r, map[string]string{
-			"error":   "Bad request",
-			"message": "Invalid email format",
-		})
+	email, ok := parseUserEmail(w, r, log)
+	if !ok {
 		return
 	}
 
@@ -346,6 +355,47 @@ func (h *Handler) GetOrdersByUserEmail(w http.ResponseWriter, r *http.Request) {
 	)
 
 	render.JSON(w, r, orders)
+}
+
+func (h *Handler) GetUserOrderHistory(w http.ResponseWriter, r *http.Request) {
+	const fn = "handlers.orders.GetUserOrderHistory"
+	log := h.log.With(
+		slog.String("fn", fn),
+		slog.String("request_id", middleware.GetReqID(r.Context())),
+	)
+
+	email, ok := parseUserEmail(w, r, log)
+	if !ok {
+		return
+	}
+
+	history, err := h.storage.GetUserOrderHistory(r.Context(), email)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			log.Warn("user not found", slog.String("email", email))
+			w.WriteHeader(http.StatusNotFound)
+			render.JSON(w, r, map[string]string{
+				"error":   "Not found",
+				"message": fmt.Sprintf("User with email %s does not exist", email),
+			})
+			return
+		}
+
+		log.Error("failed to get user order history", slog.Any("error", err))
+		w.WriteHeader(http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{
+			"error":   "Internal server error",
+			"message": "Failed to retrieve order history",
+		})
+		return
+	}
+
+	log.Info("Retrieved user order history successfully",
+		slog.String("email", email),
+		slog.Int("orders", len(history)),
+	)
+
+	render.JSON(w, r, history)
 }
 
 type checkoutRequest struct {

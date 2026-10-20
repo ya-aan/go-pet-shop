@@ -110,6 +110,8 @@ go run cmd/app/main.go          # сервер на localhost:8080
 | GET | `/orders/{id}` | Заказ с позициями | 200, 400, 404, 500 |
 | GET | `/users/{email}/orders` | Заказы пользователя, новые первыми | 200, 400, 404 (пользователя нет), 500 |
 | POST | `/checkout` | Оформить заказ в транзакции: `{"user_email", "items": [{"product_id", "quantity"}]}` | 201 `{"status", "order_id"}`, 400 (в том числе пользователя или товара нет), 409 (не хватает остатка), 500 |
+| GET | `/users/{email}/history` | История заказов: заказы с позициями и транзакциями оплаты, новые первыми | 200, 400, 404 (пользователя нет), 500 |
+| GET | `/products/popular` | Популярные товары по оплаченным заказам | 200, 500 |
 
 404 означает, что нет ресурса из URL. Если в теле запроса указан несуществующий пользователь
 или товар, ответ 400: сам адрес существует, ошибка во входных данных.
@@ -127,6 +129,8 @@ curl localhost:8080/orders/1
 curl localhost:8080/users/alice@example.com/orders
 curl -X POST localhost:8080/checkout \
   -d '{"user_email":"alice@example.com","items":[{"product_id":1,"quantity":2},{"product_id":2,"quantity":1}]}'
+curl localhost:8080/users/alice@example.com/history
+curl localhost:8080/products/popular
 ```
 
 Ответ `GET /orders/{id}`:
@@ -142,15 +146,50 @@ curl -X POST localhost:8080/checkout \
 }
 ```
 
+Ответ `GET /users/{email}/history`: оплаченный заказ из `POST /checkout` и черновик из `POST /orders`
+(у черновика нет транзакций):
+
+```json
+[
+  {
+    "id": 3, "user_id": 1, "total_price": 10, "created_at": "2026-10-20T12:33:10.872895Z",
+    "items": [
+      {"id": 4, "order_id": 3, "product_id": 3, "product_name": "Bird Seed", "quantity": 5, "unit_price": 2}
+    ],
+    "transactions": []
+  },
+  {
+    "id": 1, "user_id": 1, "total_price": 30.75, "created_at": "2026-10-20T12:33:10.832081Z",
+    "items": [
+      {"id": 1, "order_id": 1, "product_id": 1, "product_name": "Dog Food", "quantity": 2, "unit_price": 10.5},
+      {"id": 2, "order_id": 1, "product_id": 2, "product_name": "Cat Toy", "quantity": 3, "unit_price": 3.25}
+    ],
+    "transactions": [
+      {"id": 1, "order_id": 1, "amount": 30.75, "status": "paid", "created_at": "2026-10-20T12:33:10.832081Z"}
+    ]
+  }
+]
+```
+
+Ответ `GET /products/popular`: товары, которые хоть раз купили через `POST /checkout`.
+`Bird Seed` лежит только в черновике и в ответ не попадает:
+
+```json
+[
+  {"product_id": 2, "name": "Cat Toy", "total_sold": 7, "orders_count": 2, "revenue": 22.75},
+  {"product_id": 1, "name": "Dog Food", "total_sold": 2, "orders_count": 1, "revenue": 21}
+]
+```
+
 ---
 
 ## 🧪 Тестирование
 
 Unit-тесты HTTP-хендлеров лежат рядом с хендлерами:
 
-- `internal/handlers/product/products_test.go` — товары;
+- `internal/handlers/product/products_test.go`, `popular_test.go` — товары и популярные товары;
 - `internal/handlers/user/users_test.go` — пользователи;
-- `internal/handlers/order/orders_test.go` — заказы.
+- `internal/handlers/order/orders_test.go`, `checkout_test.go`, `history_test.go` — заказы, оформление и история.
 
 Тестируется только HTTP-слой: хранилище подменяется моками интерфейсов `Products`, `Users` и `Orders`,
 поэтому PostgreSQL и Docker для unit-тестов не нужны. В каждом сценарии проверяются **код и тело ответа**.
@@ -170,9 +209,11 @@ Unit-тесты HTTP-хендлеров лежат рядом с хендлер�
 | `GetOrderByID` | 200, в том числе пустой `items: []` | `id` не число | да | — | ошибка заказа и ошибка позиций |
 | `GetOrdersByUserEmail` | 200, в том числе `[]`, email как `a%40b.com` | некорректный email | пользователя нет | — | да |
 | `Checkout` | 201, в storage уходят только `product_id` и `quantity` | битый JSON, email, пустой `items`, `product_id <= 0`, `quantity` вне `1..2147483647`, переполнение суммы повторов, пользователя или товара нет | — | не хватает остатка | да |
+| `GetUserOrderHistory` | 200, черновик с `items: []` и `transactions: []`, пустая история `[]`, email как `a%40b.com` | некорректный email | пользователя нет | — | да |
+| `GetPopularProducts` | 200, в том числе `[]`; запрос не уходит в `/products/{id}` | не применимо | — | — | да |
 
-`GetAllProducts` и `GetAllUsers` не принимают входных данных: хендлеры не читают ни тело запроса,
-ни параметры пути или запроса. Поэтому сценария «некорректный вход» для них нет.
+`GetAllProducts`, `GetAllUsers` и `GetPopularProducts` не принимают входных данных: хендлеры не читают
+ни тело запроса, ни параметры пути или запроса. Поэтому сценария «некорректный вход» для них нет.
 
 Тесты пользователей и заказов вызывают хендлеры через настоящий роутер chi. Так проверяется, что
 email с точкой в домене и с закодированным `@` доходит до хранилища целиком.
@@ -181,8 +222,8 @@ email с точкой в домене и с закодированным `@` д�
 
 ### Интеграционные тесты PostgreSQL
 
-`internal/storage/postgres/integration_test.go` и `checkout_integration_test.go` проверяют SQL
-на настоящей базе:
+`internal/storage/postgres/integration_test.go`, `checkout_integration_test.go` и
+`history_integration_test.go` проверяют SQL на настоящей базе:
 
 - v2: JOIN и LEFT JOIN, CTE в `AddOrderItem`, расчёт `total_price`, фиксацию цены позиции,
   отсутствие частичных записей при ошибках, параллельное добавление позиций в один заказ,
@@ -194,7 +235,12 @@ email с точкой в домене и с закодированным `@` д�
   stock возвращается, заказов, позиций и транзакций нет;
 - v3, параллельность: 30 покупателей на 5 единиц товара дают ровно 5 заказов, stock = 0;
   покупатели товаров `[A, B]` и `[B, A]` одновременно проходят без deadlock;
-- v3: в оплаченный заказ нельзя добавить позицию, в том числе при параллельных попытках.
+- v3: в оплаченный заказ нельзя добавить позицию, в том числе при параллельных попытках;
+- v4: история содержит только заказы пользователя, новые первыми; заказ, позиции и транзакции
+  совпадают с `GetOrderByID` и `GetOrderItemsByOrderID`; у черновиков и пустого заказа пустые
+  массивы, а не `null`; пользователя нет — `ErrNotFound`;
+- v4: популярные товары считаются только по оплаченным заказам (позиции черновика не учитываются),
+  выручка — по цене на момент покупки; вторая транзакция у заказа не удваивает продажи.
 
 Файлы собираются только с тегом `integration`, поэтому обычный `go test ./...` их не запускает
 и базы не требует. Объединение повторяющихся товаров и проверка переполнения `quantity`
@@ -294,13 +340,6 @@ golangci-lint run ./...   # или: task linter
   контейнер приложения подключается к базе по имени сервиса `postgres`.
   Хост-порт базы настраивается через `DB_PORT`.
 
-Отклонения от сигнатур из ТЗ:
-
-- Все методы хранилища первым аргументом принимают `context.Context`, чтобы тайм-ауты
-  и отмена запроса доходили до базы.
-- `CreateUser` и `CreateProduct` возвращают `(int, error)` вместо `error`: ответ 201
-  содержит ID созданной записи. Так `CreateProduct` работал и раньше, `CreateUser` сделан так же.
-
 ### v2 — заказы и позиции заказа
 
 Зачем: научиться создавать заказ, добавлять в него позиции и выводить информацию по заказам
@@ -329,12 +368,7 @@ golangci-lint run ./...   # или: task linter
 - **Тесты.** Unit-тесты ручек заказов, интеграционные тесты хранилища на PostgreSQL
   (тег `integration`), задачи `task test` и `task test-integration`.
 
-Отклонения от ТЗ:
 
-- В таблице `order_items` появилось поле `unit_price` (миграция `0002`): без него стоимость старых
-  заказов менялась бы вместе с ценой товара.
-- `POST /orders/{id}/items` отвечает `{"status", "order_id", "product_id", "quantity"}` без ID позиции:
-  `AddOrderItem` по ТЗ возвращает только `error`. Позиции с ID и ценой видны в `GET /orders/{id}`.
 
 ### v3 — оформление заказа в транзакции
 
@@ -377,10 +411,45 @@ golangci-lint run ./...   # или: task linter
   `PUT /products/{id}` отвечают 400 на отрицательный stock (покрыто тестами), а `PlaceOrder`
   уменьшает остаток только при `stock >= quantity`.
 
-Отклонения от ТЗ:
 
-- `PlaceOrder` принимает `context.Context` первым аргументом, как и остальные методы хранилища.
 
-### Дальнейшие версии
+### v4 — история заказов и аналитика
 
-v4 — История заказов и аналитика (популярные товары).
+Зачем: собрать полную историю заказов пользователя запросами с `JOIN` и посчитать популярные
+товары через `GROUP BY`.
+
+Что добавлено:
+
+- **История заказов `GetUserOrderHistory(ctx, email)`** (`internal/storage/postgres/history.go`)
+  и ручка `GET /users/{email}/history`. Модель `OrderDetail` — заказ, его позиции с названием товара
+  и транзакции оплаты (новая модель `Transaction`: `amount`, `status`, `created_at`). Заказы идут
+  новыми первыми. Черновики из `POST /orders` тоже попадают в историю, у них `"transactions": []`.
+  Запросы:
+  1. `SELECT id FROM users WHERE email = $1`: если пользователя нет, ответ 404;
+  2. `orders LEFT JOIN (order_items JOIN products)`: заказы вместе с позициями одним запросом.
+     `LEFT JOIN` оставляет в истории заказы без позиций;
+  3. `transactions JOIN orders`: транзакции всех заказов пользователя.
+
+  Транзакции читаются отдельным запросом: если присоединить их тем же `JOIN`, заказ с N позициями
+  и M транзакциями дал бы N×M строк. Все три запроса выполняются в одной транзакции
+  `REPEATABLE READ READ ONLY` и читают один снимок базы. Заказ, который в это время оформляет
+  `POST /checkout`, попадёт в историю целиком или не попадёт совсем.
+- **Популярные товары `GetPopularProducts(ctx)`** (`internal/storage/postgres/analytics.go`)
+  и ручка `GET /products/popular`. Модель `PopularProduct`: `total_sold` = `SUM(quantity)`,
+  `orders_count` = `COUNT(DISTINCT order_id)`, `revenue` = `SUM(unit_price * quantity)`,
+  `GROUP BY` по товару. Сортировка по `total_sold` по убыванию, при равенстве по `product_id`.
+  - Продажа — это позиция оплаченного заказа (есть транзакция со статусом `paid`). Черновики
+    не считаются. Товаров без продаж в ответе нет. Если продаж ещё не было, ответ `[]`.
+  - Оплата проверяется через `WHERE EXISTS (...)`, а не через `JOIN transactions`. Схема позволяет
+    заказу иметь несколько транзакций, и `JOIN` умножил бы проданное количество. Это покрыто
+    интеграционным тестом.
+  - Выручка считается по `unit_price`, то есть по цене на момент покупки, а не по текущей цене товара.
+- **Миграция `0003`: индексы на внешние ключи** `orders.user_id`, `order_items.order_id`,
+  `order_items.product_id`, `transactions.order_id`. PostgreSQL сам их не создаёт, а по этим
+  колонкам идут `JOIN` истории и аналитики и проверка «заказ уже оплачен» из v3.
+- **`/products/popular` не конфликтует с `/products/{id}`.** chi сопоставляет статический сегмент
+  раньше параметра, поэтому `popular` не разбирается как ID. Unit-тест регистрирует оба маршрута
+  и проверяет, что `GetProductByID` не вызывается.
+- Разбор и проверка email из URL в ручках заказов вынесены в `parseUserEmail`: его используют
+  `/users/{email}/orders` и `/users/{email}/history`.
+

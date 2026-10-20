@@ -148,6 +148,36 @@ func (_m *Orders) GetOrdersByUserEmail(ctx context.Context, email string) ([]mod
 	return r0, r1
 }
 
+// GetUserOrderHistory provides a mock function with given fields: ctx, email
+func (_m *Orders) GetUserOrderHistory(ctx context.Context, email string) ([]models.OrderDetail, error) {
+	ret := _m.Called(ctx, email)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUserOrderHistory")
+	}
+
+	var r0 []models.OrderDetail
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]models.OrderDetail, error)); ok {
+		return rf(ctx, email)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) []models.OrderDetail); ok {
+		r0 = rf(ctx, email)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.OrderDetail)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, email)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // PlaceOrder provides a mock function with given fields: ctx, userEmail, items
 func (_m *Orders) PlaceOrder(ctx context.Context, userEmail string, items []models.OrderItem) (int, error) {
 	ret := _m.Called(ctx, userEmail, items)
